@@ -1,0 +1,4 @@
+name = "Minnie"
+uuid = "1e4c3c70-65a8-480f-98d6-1e4ca07e456d"
+authors = ["Lorenzo Monacelli <mesonepigreco@gmail.com>"]
+version = "0.1.0"
