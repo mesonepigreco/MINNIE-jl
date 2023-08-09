@@ -57,9 +57,7 @@ function (m::CustomModel)(coords, atomic_species)
     
     # Concatenate the embedding with the coordinates
     emblayer = m.embedding(permutedims(atomic_species, (2,1)))
-    println("SIZE: ", size(emblayer))
     emblayer_2 = reshape(permutedims(emblayer, (3, 1, 2)), n_rand, n_atoms * n_embedding)
-    println("SIZE: ", size(emblayer_2))
     input_layer = Flux.cat(emblayer_2', distance, dims=1)
     output = m.DNN(input_layer)
 
@@ -119,7 +117,7 @@ model = CustomModel(embedding, DNN)
 
 coords, species, energies = generate_train_set(10000, n_species, n_atoms, n_dims)
 
-η = 0.0001
+η = 0.001
 function loss(coords, species, energies)
     pred_energy = model(coords, species)
     return sum(((pred_energy .- energies)/size(coords,1)).^2)
@@ -132,7 +130,7 @@ for iter in 1:100
      end
 
      for p in params(model)
-         update!(p, -η * grads[p])
+         update!(p, η * grads[p])
      end
 
      println("$iter    $(loss(coords, species, energies))")
