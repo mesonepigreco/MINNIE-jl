@@ -18,6 +18,7 @@ n_embedding = 2
 n_atoms = 2
 n_dims = 1
 n_cutoff = 2
+n_rand = 500
 
 struct CustomModel
     embedding
@@ -57,7 +58,9 @@ function (m::CustomModel)(coords, atomic_species)
     # Concatenate the embedding with the coordinates
     emblayer = m.embedding(permutedims(atomic_species, (2,1)))
     println("SIZE: ", size(emblayer))
-    input_layer = Flux.cat(permutedims(emblayer, (3, 1, 2)), distance, dims=1)
+    emblayer_2 = reshape(permutedims(emblayer, (3, 1, 2)), n_rand, n_atoms * n_embedding)
+    println("SIZE: ", size(emblayer_2))
+    input_layer = Flux.cat(emblayer_2', distance, dims=1)
     output = m.DNN(input_layer)
 
     return output
@@ -67,6 +70,7 @@ Flux.@functor CustomModel
 
 
 function lennard_jones(r, sigma, epsilon)
+    r = sigma * √( (r/sigma)^2 + 0.4 )
     return 4 * epsilon * ((sigma / r)^12 - (sigma / r)^6)
 end
 
@@ -90,9 +94,9 @@ function generate_train_set(n_random, n_species, n_atoms, dimensions)
     coords = randn(Float32, n_random, n_atoms * dimensions)
     species = rand(1:n_species, n_random, n_atoms)
 
-    sigma_dict = Dict(1 => Float32(1.0), 2 => Float32(2.0))
+    sigma_dict = Dict(1 => Float32(0.5), 2 => Float32(0.3))
 
-    epsilon_dict = Dict(1 => Float32(1.0), 2 => Float32(2.0))
+    epsilon_dict = Dict(1 => Float32(0.2), 2 => Float32(.4))
 
     energies = zeros(Float32, n_random)
 
@@ -106,7 +110,7 @@ end
 
 embedding = Embedding(n_species => n_embedding)
 DNN = Chain(
-            Dense(n_embedding + 1, 32, relu),
+            Dense(n_embedding*n_atoms + 1, 32, relu),
             Dense(32, 16, relu),
             Dense(16, 1)
             )
@@ -115,22 +119,21 @@ model = CustomModel(embedding, DNN)
 
 coords, species, energies = generate_train_set(10000, n_species, n_atoms, n_dims)
 
-η = 0.01
+η = 0.0001
 function loss(coords, species, energies)
     pred_energy = model(coords, species)
-    return sum((pred_energy .- energies).^2)
+    return sum(((pred_energy .- energies)/size(coords,1)).^2)
 end
 
 
-# for iter in 1:100
-#     grads = gradient(params(model)) do
-#         loss(coords, species, energies)
-#     end
-# 
-#     for p in params(model)
-#         update!(p, -η * grads[p])
-#     end
-# 
-#     println("$iter    $(loss(coords, species, energies))")
-# end
-#ju 
+for iter in 1:100
+     grads = gradient(params(model)) do
+         loss(coords, species, energies)
+     end
+
+     for p in params(model)
+         update!(p, -η * grads[p])
+     end
+
+     println("$iter    $(loss(coords, species, energies))")
+end
