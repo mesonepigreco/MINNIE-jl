@@ -4,6 +4,7 @@ using Flux
 using Zygote: @ignore
 using Flux.Optimise: update!, Descent
 using Flux: params
+using JLD2
 
 using ChainRulesCore
 using ChainRulesCore: rrule
@@ -13,12 +14,13 @@ Module to encode the embedding of the atomic species. """
 
 
 # Create the neural network
-n_species = 2
-n_embedding = 2
-n_atoms = 2
-n_dims = 1
-n_cutoff = 2
-n_rand = 500
+const n_species = 2
+const n_embedding = 2
+const n_atoms = 2
+const n_dims = 1
+const n_cutoff = 2
+const n_rand = 20000
+const n_test_set = 1000
 
 struct CustomModel
     embedding
@@ -105,33 +107,67 @@ function generate_train_set(n_random, n_species, n_atoms, dimensions)
     return coords, species, energies
 end
 
-
-embedding = Embedding(n_species => n_embedding)
-DNN = Chain(
-            Dense(n_embedding*n_atoms + 1, 32, relu),
-            Dense(32, 16, relu),
-            Dense(16, 1)
-            )
-
-model = CustomModel(embedding, DNN)
-
-coords, species, energies = generate_train_set(10000, n_species, n_atoms, n_dims)
-
-η = 0.001
-function loss(coords, species, energies)
+function loss(model, coords, species, energies)
     pred_energy = model(coords, species)
-    return sum(((pred_energy .- energies)/size(coords,1)).^2)
+    return Flux.mse(pred_energy, reshape(energies, (1, length(energies))))
+end
+
+function main()
+    embedding = Embedding(n_species => n_embedding)
+    DNN = Chain(
+                Dense(n_embedding*n_atoms + 1, 32, relu),
+                Dense(32, 16, relu),
+                Dense(16, 1)
+                )
+
+    model = CustomModel(embedding, DNN)
+
+    coords, species, energies = generate_train_set(n_rand, n_species, n_atoms, n_dims)
+    test_coords, test_species, test_energies = generate_train_set(n_test_set, n_species, n_atoms, n_dims)
+
+
+
+    # Compare the gradient with finite differences
+    old_loss = loss(model, test_coords, test_species, test_energies)
+    min_loss = old_loss
+    η :: Float32 = 0.001
+    for iter in 1:1000
+        # Pick the subset of configurations 
+        mini_batch = rand(1:size(coords, 1), 100)
+
+        
+        batch_coords = coords[mini_batch, :]
+        batch_species = species[mini_batch, :]
+        batch_energies = energies[mini_batch]
+
+        grads = gradient(params(model)) do
+            loss(model, batch_coords, batch_species, batch_energies)
+        end
+
+        
+        for p in params(model)
+            update!(p, η * grads[p])
+        end
+
+
+        # Compute the loss of the training set
+        train_loss = loss(model, test_coords, test_species, test_energies)
+
+        if (train_loss > old_loss)
+            η = η / 1.2
+        end
+
+        if (train_loss < min_loss)
+            # Save the model
+            jldsave("model-checkpoint.jld2"; model_state=Flux.state(model))
+            min_loss = train_loss
+        end
+        old_loss = train_loss
+
+        println("$iter    $(train_loss)")
+    end
 end
 
 
-for iter in 1:100
-     grads = gradient(params(model)) do
-         loss(coords, species, energies)
-     end
+main()
 
-     for p in params(model)
-         update!(p, η * grads[p])
-     end
-
-     println("$iter    $(loss(coords, species, energies))")
-end
